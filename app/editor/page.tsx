@@ -1,9 +1,9 @@
-"use client";
-import { useEffect, useState, useRef } from "react";
+"use client"
+import { Suspense, useEffect, useState, useRef } from "react";
 import { useSearchParams } from "next/navigation";
 import { getTemplates } from "@/lib/templates";
 
-export default function EditorPage() {
+function EditorContent() {
   const params = useSearchParams();
   const id = params.get("id");
   const [template, setTemplate] = useState<any>(null);
@@ -31,7 +31,6 @@ export default function EditorPage() {
     const url = URL.createObjectURL(f);
     const n=[...clips]; (n[i] as any).preview=url; setClips(n);
     const nf=[...files]; nf[i]=f; setFiles(nf);
-    // get real duration
     const v = document.createElement("video");
     v.src = url;
     v.onloadedmetadata = () => {
@@ -105,4 +104,12 @@ export default function EditorPage() {
       </div>
     </div>
   );
+}
+
+export default function EditorPage() {
+  return (
+    <Suspense fallback={<div className="flex items-center justify-center min-h-screen bg-black text-white">Loading editor...</div>}>
+      <EditorContent />
+    </Suspense>
+  )
 }
