@@ -6,7 +6,8 @@ from typing import List
 import numpy as np
 
 # SceneDetect imports
-from scenedetect import VideoManager, SceneManager
+from scenedetect.video_manager import VideoManager
+from scenedetect.scene_manager import SceneManager
 from scenedetect.detectors import ContentDetector
 
 try:
