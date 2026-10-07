@@ -49,7 +49,7 @@ function EditorContent() {
     fd.append("effects_json",JSON.stringify(clips.map((c:any)=>c.effects || [])));
 
     try{
-      const res = await fetch("http://localhost:8000/export", { method: "POST", body: fd });
+      const res = await fetch('https://editrecap-backend.onrender.com', { method: "POST", body: fd });
       if(!res.ok) throw new Error("export failed");
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
