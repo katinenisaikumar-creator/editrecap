@@ -1,7 +1,8 @@
-   fastapi
-   uvicorn
-   opencv-python
-   scenedetect
-   librosa
-   numpy
-   python-multipart
+fastapi
+uvicorn
+opencv-python
+scenedetect[opencv]
+numpy
+librosa
+python-multipart
+imageio-ffmpeg
