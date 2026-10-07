@@ -1,12 +1,9 @@
 from fastapi import FastAPI, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
-import cv2, tempfile, os, subprocess, json
+import cv2, tempfile, os, subprocess, json, shutil
 from typing import List
 import numpy as np
-
-
-
 
 # SceneDetect imports
 from scenedetect.video_manager import VideoManager
@@ -18,10 +15,17 @@ try:
     FFMPEG_BIN = imageio_ffmpeg.get_ffmpeg_exe()
 except:
     FFMPEG_BIN = "ffmpeg"
-print(f"Using FFmpeg: {FFMPEG_BIN}")
 
-app = FastAPI()
-app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+app = FastAPI(title="EditRecap AI")
+
+# CORS - nee Vercel link pettu
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["https://editrecap-bice.vercel.app"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 @app.get("/")
 def home():
@@ -29,10 +33,9 @@ def home():
 
 # ============ SMART ANALYZER ============
 def detect_clips_smart(video_path):
-    # 1. AUTO SCENE DETECTION
     video_manager = VideoManager([video_path])
     scene_manager = SceneManager()
-    scene_manager.add_detector(ContentDetector(threshold=25.0)) # 0.2sec cut kuda paduthundi
+    scene_manager.add_detector(ContentDetector(threshold=25.0))
 
     video_manager.start()
     scene_manager.detect_scenes(frame_source=video_manager)
@@ -40,7 +43,7 @@ def detect_clips_smart(video_path):
     fps = video_manager.get_fps()
     duration = video_manager.get_duration().get_seconds()
 
-    # 2. SPLIT-SCREEN CHECK - TRAVEL 6 grid laanti vatiki
+    # SPLIT-SCREEN CHECK
     cap = cv2.VideoCapture(video_path)
     ret, first_frame = cap.read()
     is_split_screen = False
@@ -49,23 +52,20 @@ def detect_clips_smart(video_path):
     if ret:
         h, w = first_frame.shape[:2]
         parts = []
-        # 6 equal vertical strips check
         for i in range(6):
             x1 = i * w//6
             x2 = (i+1) * w//6
             part = first_frame[:, x1:x2]
-            parts.append(np.std(part)) # motion/brightness diff
-
-        if max(parts) - min(parts) > 20: # 6 different videos unte
+            parts.append(np.std(part))
+        if max(parts) - min(parts) > 20:
             is_split_screen = True
             split_clip_count = 6
     cap.release()
     video_manager.release()
 
-    # 3. FINAL LOGIC
     num_scenes = len(scene_list)
 
-    # Case 1: Single clip with effects
+    # Case 1: Single clip
     if num_scenes <= 1 and not is_split_screen:
         return {
             "template_name": "Single Clip Effects Template",
@@ -86,7 +86,7 @@ def detect_clips_smart(video_path):
     # Case 2: Split screen
     if is_split_screen:
         clips = []
-        split_dur = 5.9 # TRAVEL intro duration
+        split_dur = 5.9
         for i in range(split_clip_count):
             clips.append({
                 "clip_id": i+1,
@@ -106,7 +106,7 @@ def detect_clips_smart(video_path):
             "clips": clips
         }
 
-    # Case 3: Normal Multi-clip - ANNI CUTS
+    # Case 3: Normal Multi-clip
     clips = []
     for i, (start_time, end_time) in enumerate(scene_list):
         clips.append({
@@ -125,7 +125,7 @@ def detect_clips_smart(video_path):
         "type": "multi_clip",
         "message": f"{num_scenes} clips detected! 📌",
         "clips": clips,
-        "music_sync": {"tempo_bpm": 120.0} # dummy, tarvatha beat detect add cheyyochu
+        "music_sync": {"tempo_bpm": 120.0}
     }
 
 @app.post("/analyze")
@@ -140,7 +140,7 @@ async def analyze_video(file: UploadFile = File(...)):
     finally:
         os.remove(tmp_path)
 
-# ============ EXPORT API - SAME AS YOURS ============
+# ============ EXPORT API ============
 @app.post("/export")
 async def export_video(
     files: List[UploadFile] = File(...),
@@ -164,32 +164,34 @@ async def export_video(
             target_dur = float(durs[idx]) if idx < len(durs) else 3.66
             start = float(trim_starts[idx]) if idx < len(trim_starts) else 0
 
+            # Trim + Resize to 1080x1920
             cmd1 = [
                 FFMPEG_BIN, "-y",
                 "-ss", str(start),
                 "-i", raw_path,
                 "-t", str(target_dur),
-                "-vf", "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,setsar=1",
-                "-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "veryfast",
-                "-c:a", "aac", "-r", "30",
+                "-vf", "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920",
+                "-c:v", "libx264", "-preset", "ultrafast", "-crf", "28",
+                "-c:a", "aac", "-b:a", "128k",
                 norm_path
             ]
-            subprocess.run(cmd1, check=True)
+            subprocess.run(cmd1, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             clip_paths.append(norm_path)
 
+        # Concat all clips
         list_path = os.path.join(temp_dir, "list.txt")
-        with open(list_path, "w") as lf:
+        with open(list_path, "w", encoding="utf-8") as lf:
             for p in clip_paths:
                 lf.write(f"file '{p.replace(chr(92), '/')}'\n")
 
         output_path = os.path.join(temp_dir, "final_export.mp4")
         cmd2 = [FFMPEG_BIN, "-y", "-f", "concat", "-safe", "0", "-i", list_path, "-c", "copy", output_path]
-        subprocess.run(cmd2, check=True)
+        subprocess.run(cmd2, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
         return FileResponse(output_path, filename="EditRecap_export.mp4", media_type="video/mp4")
 
     except Exception as e:
         print(f"EXPORT ERROR: {e}")
-        import traceback
-        traceback.print_exc()
         return {"error": str(e)}
+    finally:
+        shutil.rmtree(temp_dir, ignore_errors=True)
